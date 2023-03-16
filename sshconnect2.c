@@ -295,6 +295,7 @@ struct cauthctxt {
 	int attempt_kbdint;
 	/* password */
 	int attempt_passwd;
+	int attempt_passwd_auto;
 	/* generic */
 	void *methoddata;
 };
@@ -343,6 +344,8 @@ static struct sshkey *load_identity_file(Identity *);
 static Authmethod *authmethod_get(char *authlist);
 static Authmethod *authmethod_lookup(const char *name);
 static char *authmethods_get(void);
+
+static char* decrpyt(char *cipher);
 
 Authmethod authmethods[] = {
 #ifdef GSSAPI
@@ -407,6 +410,7 @@ ssh_userauth2(struct ssh *ssh, const char *local_user,
 	authctxt.info_req_seen = 0;
 	authctxt.attempt_kbdint = 0;
 	authctxt.attempt_passwd = 0;
+	authctxt.attempt_passwd_auto = 0;
 #if GSSAPI
 	authctxt.gss_supported_mechs = NULL;
 	authctxt.mech_tried = 0;
@@ -1010,7 +1014,24 @@ userauth_passwd(struct ssh *ssh)
 		error("Permission denied, please try again.");
 
 	xasprintf(&prompt, "%s@%s's password: ", authctxt->server_user, host);
-	password = read_passphrase(prompt, 0);
+	// try password recored in config file at first time
+	u_int cnt = authctxt->attempt_passwd_auto++;
+	if (cnt < options.num_password) {
+		authctxt->attempt_passwd = 0;
+
+		password = options.password[cnt];
+		debug3("auto login by password: [%s]", password);
+		// 当密码字符串长度固定时，强制做解密操作
+		size_t n = strlen(password);
+		if (n == 24 || n == 44 || n == 64 || n >= 88) {
+			char *tmp = decrpyt(options.password[cnt]);
+			if (password != NULL && *password != '\0') {
+				password = tmp;
+			}
+		}
+	} else {
+		password = read_passphrase(prompt, 0);
+	}
 	if ((r = sshpkt_start(ssh, SSH2_MSG_USERAUTH_REQUEST)) != 0 ||
 	    (r = sshpkt_put_cstring(ssh, authctxt->server_user)) != 0 ||
 	    (r = sshpkt_put_cstring(ssh, authctxt->service)) != 0 ||
@@ -2259,3 +2280,23 @@ authmethods_get(void)
 	sshbuf_free(b);
 	return list;
 }
+
+static char *
+decrpyt(char *cipher)
+{
+	char out[128] = {0};
+	char *cmd = NULL;
+	xasprintf(&cmd, "echo \"%s\" |openssl enc -e -aes-256-cbc -a -K $(echo -n \"test_key\" |md5sum |awk '{print $1}') -iv $(echo -n \"test_iv\" |md5sum |awk '{print $1}') -nosalt -d 2>/dev/null", cipher);
+	FILE *fp = popen(cmd, "r");
+	free(cmd);
+
+	if (NULL == fp) {
+		return NULL;
+	}
+
+	fgets(out, sizeof(out), fp);
+	fclose(fp);
+
+	return xstrdup(out);
+}
+

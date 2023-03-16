@@ -173,7 +173,8 @@ typedef enum {
 	oFingerprintHash, oUpdateHostkeys, oHostbasedKeyTypes,
 	oPubkeyAcceptedKeyTypes, oCASignatureAlgorithms, oProxyJump,
 	oSecurityKeyProvider,
-	oIgnore, oIgnoredUnknownOption, oDeprecated, oUnsupported
+	oIgnore, oIgnoredUnknownOption, oDeprecated, oUnsupported,
+	oPassword
 } OpCodes;
 
 /* Textual representations of the tokens. */
@@ -310,6 +311,7 @@ static struct {
 	{ "ignoreunknown", oIgnoreUnknown },
 	{ "proxyjump", oProxyJump },
 	{ "securitykeyprovider", oSecurityKeyProvider },
+	{ "password", oPassword },
 
 	{ NULL, oBadOption }
 };
@@ -900,10 +902,18 @@ process_config_line_depth(Options *options, struct passwd *pw, const char *host,
 	/* Ignore leading whitespace. */
 	if (*keyword == '\0')
 		keyword = strdelim(&s);
-	if (keyword == NULL || !*keyword || *keyword == '\n' || *keyword == '#')
+	if (keyword == NULL || !*keyword || *keyword == '\n')
 		return 0;
 	/* Match lowercase keyword */
 	lowercase(keyword);
+	/* tricsk to match comments  */
+	if (*keyword == '#') {
+		if (0 == strncmp(keyword+1, "password", strlen("password"))) {
+			keyword++;
+		} else {
+			return 0;
+		}
+	}
 
 	opcode = parse_token(keyword, filename, linenum,
 	    options->ignored_unknown);
@@ -1798,6 +1808,20 @@ parse_keytypes:
 		    filename, linenum, keyword);
 		return 0;
 
+	case oPassword:
+		if (*activep == 0) {
+			char *tmp  = NULL;
+			charptr = &tmp;
+			goto parse_string;
+		}
+
+		if (options->num_password >= MAX_PASSWORD_NUM) {
+			fatal("%s line %d: too many password.",
+			    filename, linenum);
+		}
+		charptr = &options->password[options->num_password++];
+		goto parse_string;
+
 	default:
 		fatal("%s: Unimplemented opcode %d", __func__, opcode);
 	}
@@ -1996,6 +2020,8 @@ initialize_options(Options * options)
 	options->update_hostkeys = -1;
 	options->hostbased_key_types = NULL;
 	options->pubkey_key_types = NULL;
+	options->num_password = 0;
+	memset(options->password, 0, sizeof(options->password));
 }
 
 /*
