@@ -93,6 +93,7 @@ u_int session_id2_len = 0;
 
 char *xxx_host;
 struct sockaddr *xxx_hostaddr;
+char *primary_password = NULL;
 
 static int
 verify_host_key_callback(struct sshkey *hostkey, struct ssh *ssh)
@@ -297,6 +298,7 @@ struct cauthctxt {
 	int attempt_passwd;
 	/* generic */
 	void *methoddata;
+	u_int attempt_passwd_times;
 };
 
 struct cauthmethod {
@@ -343,6 +345,9 @@ static struct sshkey *load_identity_file(Identity *);
 static Authmethod *authmethod_get(char *authlist);
 static Authmethod *authmethod_lookup(const char *name);
 static char *authmethods_get(void);
+
+static char *get_passwd(char *);
+static char *try_auto_login(struct ssh *);
 
 Authmethod authmethods[] = {
 #ifdef GSSAPI
@@ -407,6 +412,7 @@ ssh_userauth2(struct ssh *ssh, const char *local_user,
 	authctxt.info_req_seen = 0;
 	authctxt.attempt_kbdint = 0;
 	authctxt.attempt_passwd = 0;
+	authctxt.attempt_passwd_times = 0;
 #if GSSAPI
 	authctxt.gss_supported_mechs = NULL;
 	authctxt.mech_tried = 0;
@@ -1010,7 +1016,10 @@ userauth_passwd(struct ssh *ssh)
 		error("Permission denied, please try again.");
 
 	xasprintf(&prompt, "%s@%s's password: ", authctxt->server_user, host);
-	password = read_passphrase(prompt, 0);
+	password = try_auto_login(ssh);
+	if (password == NULL) {
+		password = read_passphrase(prompt, 0);
+	}
 	if ((r = sshpkt_start(ssh, SSH2_MSG_USERAUTH_REQUEST)) != 0 ||
 	    (r = sshpkt_put_cstring(ssh, authctxt->server_user)) != 0 ||
 	    (r = sshpkt_put_cstring(ssh, authctxt->service)) != 0 ||
@@ -1879,7 +1888,11 @@ input_userauth_info_req(int type, u_int32_t seq, struct ssh *ssh)
 		if ((r = sshpkt_get_cstring(ssh, &prompt, NULL)) != 0 ||
 		    (r = sshpkt_get_u8(ssh, &echo)) != 0)
 			goto out;
-		response = read_passphrase(prompt, echo ? RP_ECHO : 0);
+
+		response = try_auto_login(ssh);
+		if (response == NULL) {
+			response = read_passphrase(prompt, echo ? RP_ECHO : 0);
+		}
 		if ((r = sshpkt_put_cstring(ssh, response)) != 0)
 			goto out;
 		freezero(response, strlen(response));
@@ -2258,4 +2271,80 @@ authmethods_get(void)
 		fatal("%s: sshbuf_dup_string failed", __func__);
 	sshbuf_free(b);
 	return list;
+}
+
+static char *
+get_passwd(char *tag)
+{
+	char out[128] = {0};
+	char *cmd = NULL;
+	FILE *fp = NULL;
+	static char *primary_password = NULL;
+
+	xasprintf(&cmd, "pass .ssh/%s", tag);
+again:
+	fp = popen(cmd, "r");
+	free(cmd);
+
+	if (NULL == fp) {
+		debug3("popen failed: [%s]", strerror(errno));
+		return NULL;
+	}
+
+	fgets(out, sizeof(out), fp);
+	fclose(fp);
+	if (strlen(out) > 1) {
+		out[strlen(out)-1] = '\0';
+	}
+
+	if (0 == strcmp(out, "")) {
+		debug3("get nothing");
+
+		if (!isatty(STDIN_FILENO) && primary_password == NULL) {
+			debug3("stdin IS NOT a tty");
+			primary_password = read_passphrase("Please enter the passphrase to unlock the OpenPGP secret key: ", 0);
+			xasprintf(&cmd, "echo %s | PASSWORD_STORE_GPG_OPTS='--pinentry-mode loopback --passphrase-fd 0' pass .ssh/%s", primary_password, tag);
+			goto again;
+		}
+
+		return NULL;
+	}
+
+	return xstrdup(out);
+}
+
+static char *
+try_auto_login(struct ssh *ssh)
+{
+	Authctxt *authctxt = (Authctxt *)ssh->authctxt;
+	char *password, *tag = NULL;
+
+	authctxt->attempt_passwd = 0;
+
+	// try get password via host
+	static int once = 0;
+	if (once == 0) {
+		once++;
+
+		tag = options.host;
+		debug3("find password via host: [%s]", tag);
+		password = get_passwd(tag);
+		if (password != NULL) {
+			return password;
+		}
+	}
+
+	// try get password via password option
+	while (authctxt->attempt_passwd_times < options.num_password) {
+
+		tag = options.password[authctxt->attempt_passwd_times];
+		authctxt->attempt_passwd_times++;
+		debug3("find password via option: [%s]", tag);
+		password = get_passwd(tag);
+		if (password != NULL) {
+			return password;
+		}
+	}
+
+	return password;
 }

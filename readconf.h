@@ -21,6 +21,7 @@
 #define SSH_MAX_HOSTS_FILES	32
 #define MAX_CANON_DOMAINS	32
 #define PATH_MAX_SUN		(sizeof((struct sockaddr_un *)0)->sun_path)
+#define MAX_PASSWORD_NUM        8
 
 struct allowed_cname {
 	char *source_list;
@@ -166,6 +167,10 @@ typedef struct {
 	char   *jump_host;
 	int	jump_port;
 	char   *jump_extra;
+
+	u_int   num_password;
+	char   *password[MAX_PASSWORD_NUM];
+	char   *host;
 
 	char	*ignored_unknown; /* Pattern list of unknown tokens to ignore */
 }       Options;
