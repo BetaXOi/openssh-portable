@@ -543,6 +543,7 @@ typedef enum {
 	sStreamLocalBindMask, sStreamLocalBindUnlink,
 	sAllowStreamLocalForwarding, sFingerprintHash, sDisableForwarding,
 	sExposeAuthInfo, sRDomain, sPubkeyAuthOptions, sSecurityKeyProvider,
+	sConnectTimeout,
 	sDeprecated, sIgnore, sUnsupported
 } ServerOpCodes;
 
@@ -695,6 +696,7 @@ static struct {
 	{ "rdomain", sRDomain, SSHCFG_ALL },
 	{ "casignaturealgorithms", sCASignatureAlgorithms, SSHCFG_ALL },
 	{ "securitykeyprovider", sSecurityKeyProvider, SSHCFG_GLOBAL },
+	{ "connecttimeout", sConnectTimeout, SSHCFG_ALL },
 	{ NULL, sBadOption, 0 }
 };
 
@@ -2349,6 +2351,10 @@ process_server_config_line_depth(ServerOptions *options, char *line,
 		    arg = strdelim(&cp);
 		break;
 
+	case sConnectTimeout:
+		intptr = &options->connect_timeout;
+		goto parse_int;
+
 	default:
 		fatal("%s line %d: Missing handler for opcode %s (%d)",
 		    filename, linenum, arg, opcode);
@@ -2868,6 +2874,8 @@ dump_config(ServerOptions *o)
 		}
 	}
 	dump_cfg_string(sPermitTunnel, s);
+
+	dump_cfg_int(sConnectTimeout, o->connect_timeout);
 
 	printf("ipqos %s ", iptos2str(o->ip_qos_interactive));
 	printf("%s\n", iptos2str(o->ip_qos_bulk));

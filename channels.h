@@ -349,4 +349,6 @@ void	 chan_rcvd_ieof(struct ssh *, Channel *);
 void	 chan_write_failed(struct ssh *, Channel *);
 void	 chan_obuf_empty(struct ssh *, Channel *);
 
+void     channel_set_connect_timeout(int);
+
 #endif

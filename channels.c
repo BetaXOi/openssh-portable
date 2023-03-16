@@ -220,6 +220,8 @@ static int rdynamic_connect_finish(struct ssh *, Channel *);
 /* Setup helper */
 static void channel_handler_init(struct ssh_channels *sc);
 
+static int connect_timeout = 0;
+
 /* -- channel core */
 
 void
@@ -4222,8 +4224,8 @@ connect_next(struct channel_connect *cctx)
 		}
 		if (set_nonblock(sock) == -1)
 			fatal("%s: set_nonblock(%d)", __func__, sock);
-		if (connect(sock, cctx->ai->ai_addr,
-		    cctx->ai->ai_addrlen) == -1 && errno != EINPROGRESS) {
+		if (timeout_connect(sock, cctx->ai->ai_addr,
+		    cctx->ai->ai_addrlen, &connect_timeout) == -1 && errno != EINPROGRESS) {
 			debug("connect_next: host %.100s ([%.100s]:%s): "
 			    "%.100s", cctx->host, ntop, strport,
 			    strerror(errno));
@@ -4925,3 +4927,10 @@ x11_request_forwarding_with_spoofing(struct ssh *ssh, int client_session_id,
 		fatal("%s: send x11-req: %s", __func__, ssh_err(r));
 	free(new_data);
 }
+
+void
+channel_set_connect_timeout(int timeout)
+{
+	connect_timeout = timeout;
+}
+
